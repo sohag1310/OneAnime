@@ -5,15 +5,15 @@ import cors from 'cors';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import path from 'path';
+import fs from 'fs';
 import https from 'https';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import { scoreTitleMatch } from './src/utils/searchMatch.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 
 const keepAliveHttpsAgent = new https.Agent({
   keepAlive: true,
@@ -1785,22 +1785,31 @@ async function startServer() {
     }
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  // API 404 handler (prevents returning index.html for invalid API calls)
+  app.all('/api/*', (_req: Request, res: Response) => {
+    res.status(404).json({ success: false, error: 'API endpoint not found' });
+  });
+
+  const distPath = path.resolve(__dirname, 'dist');
+  const indexPath = path.resolve(distPath, 'index.html');
+  const isProd = process.env.NODE_ENV === 'production' || fs.existsSync(indexPath);
+
+  if (!isProd) {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(__dirname, 'dist');
     app.use(express.static(distPath));
     app.get('*', (_req: Request, res: Response) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      res.sendFile(indexPath);
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`One Yesly server running on http://0.0.0.0:${PORT}`);
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`One Yesly server running on http://0.0.0.0:${PORT} in ${isProd ? 'PRODUCTION' : 'DEVELOPMENT'} mode`);
     // Pre-warm home sections & ToonStream's stock catalog asynchronously in the background
     buildHomeCatalogPools().catch(() => {});
     warmStockIndex().catch(() => {});
